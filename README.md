@@ -1,6 +1,5 @@
 # Mini_Unix_Shell
 
-Open command.h (or create it) and define the AST: enum conjunction { NONE, AND, OR, SEMI, PIPE, SUBSHELL }; extern const char *conj[]; struct tree { char **argv; char *input; char *output; enum conjunction conjunction; struct tree *left, *right; };.
 
 Add a source (e.g., command.c) that defines const char *conj[] = { "NONE", "AND", "OR", "SEMI", "PIPE", "SUBSHELL" }; so print_tree links.
 
@@ -22,9 +21,6 @@ Add memory cleanup: implement free_tree(struct tree *) to free argv/input/output
 Create a Makefile that builds d8sh, compiling d8sh.c, executor.c, command.c, parser/lexer files: e.g., d8sh: d8sh.o executor.o command.o parser.o lexer.o with CC=gcc, CFLAGS=-Wall -Wextra -g.
 
 Test manually: run ./d8sh, try ls, ls | wc -l, false && echo ok, true || echo no, redirections <, >, subshell (cd /tmp; pwd), and cd/exit.
-
-
-
 
 
 

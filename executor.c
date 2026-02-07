@@ -16,19 +16,70 @@
 static void print_tree(struct tree *t);
 static int handle_builtin(struct tree *t);
 
+static int extract_status(int status) {
+   if (WIFEXITED(status)) {
+      return WEXITSTATUS(status);
+   }
+   if (WIFSIGNALED(status)) {
+      return 128 + WTERMSIG(status);
+   }
+   return 1;
+}
+
+static int apply_redirection(struct tree *t) {
+   if (t->input) {
+      int fd = open(t->input, O_RDONLY);
+      if (fd < 0) {
+         perror(t->input);
+         return -1;
+      }
+      if (dup2(fd, STDIN_FILENO) < 0) {
+         perror("dup2");
+         close(fd);
+         return -1;
+      }
+      close(fd);
+   }
+
+   if (t->output) {
+      int fd = open(t->output, OPEN_FLAGS, DEF_MODE);
+      if (fd < 0) {
+         perror(t->output);
+         return -1;
+      }
+      if (dup2(fd, STDOUT_FILENO) < 0) {
+         perror("dup2");
+         close(fd);
+         return -1;
+      }
+      close(fd);
+   }
+   return 0;
+}
+
 // Checks for different basic commands (exit, cd, etc)
 static int handle_builtin(struct tree *t) {
-   if (strcmp(t->argv[0], "exit") == 0) {
-      exit(0);
+   if (t == NULL || t->argv == NULL || t->argv[0] == NULL) {
+      return 0;
    }
-   
+
+   if (strcmp(t->argv[0], "exit") == 0) {
+      int code = 0;
+      if (t->argv[1] != NULL) {
+         code = atoi(t->argv[1]);
+      }
+      exit(code);
+   }
+
    if (strcmp(t->argv[0], "cd") == 0) {
       if (t->argv[1] == NULL) {
-         if (chdir(getenv("HOME")) != 0)
+         if (chdir(getenv("HOME")) != 0) {
             perror("cd");
+         }
       } else {
-         if (chdir(t->argv[1]) != 0)
+         if (chdir(t->argv[1]) != 0) {
             perror("cd");
+         }
       }
       // built-in handled
       return 1;
@@ -38,11 +89,12 @@ static int handle_builtin(struct tree *t) {
 }
 
 int execute(struct tree *t) {
-   int f_in, f_out, status;
+   int status;
    pid_t pid;
 
-   if (t == NULL)
+   if (t == NULL) {
       return -1;
+   }
 
    // Simple Command (Leaf)
    if (t->conjunction == NONE) {
@@ -63,46 +115,19 @@ int execute(struct tree *t) {
       // Parent Code
       if (pid != 0) {
          waitpid(pid, &status, 0);
-         return WEXITSTATUS(status);
+         return extract_status(status);
       }
 
       // Child Code
-      // If an input file is provided, changes the file descriptor to the input file from the standard input.
-      if (t->input != NULL) {
-         if ((f_in = open(t->input, O_RDONLY)) < 0) {
-            err(EX_OSERR, "file opening failed.\n");
-         }
-         // stdin now associated with the file.
-         if (dup2(f_in, STDIN_FILENO) < 0) {
-            err(EX_OSERR, "dup2 error\n");
-         }
-         // Closes old file id.
-         if (close(f_in) < 0) {
-            err(EX_OSERR, "close error\n");
-         }
-      }
-
-      // If an output file is provided, changes the file descriptor to the input file from the standard input.
-
-      if (t->output != NULL) {
-         if ((f_out = open(t->output, OPEN_FLAGS, DEF_MODE)) < 0) {
-            err(EX_OSERR, "file opening failed.\n");
-         }
-         /* stdin now associated with the file */
-         if (dup2(f_out, STDOUT_FILENO) < 0) {
-            err(EX_OSERR, "dup2 error\n");
-         }
-         /* Closes old file id. */
-         if (close(f_out) < 0) {
-            err(EX_OSERR, "close error\n");
-         }
+      if (apply_redirection(t) < 0) {
+         _exit(1);
       }
       execvp(t->argv[0], t->argv);
 
-      // If the execvp command works, it never reaches here. 
+      // If the execvp command works, it never reaches here.
       // If it fails, exits the child process.
       perror(t->argv[0]);
-      exit(127);
+      _exit(127);
 
    } else if (t->conjunction == AND) {
       // Executes right if left is successful.
@@ -184,8 +209,8 @@ int execute(struct tree *t) {
 
       waitpid(left_pid, &status, 0);
       waitpid(right_pid, &status, 0);
-      return WEXITSTATUS(status);
-
+      return extract_status(status);
+      
    } else if (t->conjunction == SUBSHELL) {
       pid_t n_pid;
       if ((n_pid = fork()) < 0) {
@@ -195,9 +220,9 @@ int execute(struct tree *t) {
       // Parent Code
       if (n_pid != 0) {
          waitpid(n_pid, &status, 0);
-         return WEXITSTATUS(status);
+         return extract_status(status);
 
-      // Child Code
+         // Child Code
       } else {
          // Executes the command (which is in the left tree) in a subshell.
          exit(execute(t->left));
