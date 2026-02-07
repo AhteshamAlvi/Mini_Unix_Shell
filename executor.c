@@ -5,7 +5,6 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sysexits.h>
-#include <err.h>
 #include <fcntl.h>
 #include "command.h"
 #include "executor.h"
@@ -88,7 +87,7 @@ static int handle_builtin(struct tree *t) {
    return 0;
 }
 
-int execute(struct tree *t) {
+int execute(struct tree *t, int allow_builtin) {
    int status;
    pid_t pid;
 
@@ -102,53 +101,48 @@ int execute(struct tree *t) {
          return 0;
       }
 
-      // Built-ins handled first
-      if (handle_builtin(t)) {
+      if (allow_builtin && handle_builtin(t)) {
          return 0;
       }
 
-      // Fork
-      if ((pid = fork()) < 0) {
-         err(EX_OSERR, "fork error");
+      pid_t pid = fork();
+      if (pid < 0) {
+         perror("fork");
+         return 1;
       }
 
-      // Parent Code
       if (pid != 0) {
+         int status;
          waitpid(pid, &status, 0);
          return extract_status(status);
       }
 
-      // Child Code
       if (apply_redirection(t) < 0) {
          _exit(1);
       }
-      execvp(t->argv[0], t->argv);
 
-      // If the execvp command works, it never reaches here.
-      // If it fails, exits the child process.
+      execvp(t->argv[0], t->argv);
       perror(t->argv[0]);
       _exit(127);
 
    } else if (t->conjunction == AND) {
       // Executes right if left is successful.
-      int left = execute(t->left);
-      if (left == 0) {
-         return execute(t->right);
-      }
+      int left = execute(t->left, allow_builtin);
+      if (left == 0)
+         return execute(t->right, allow_builtin);
       return left;
 
    } else if (t->conjunction == OR) {
       // Exevutes right if left is unsuccesseful.
-      int left = execute(t->left);
-      if (left != 0) {
-         return execute(t->right);
-      }
+      int left = execute(t->left, allow_builtin);
+      if (left != 0)
+         return execute(t->right, allow_builtin);
       return left;
 
    } else if (t->conjunction == SEMI) {
       // Executes left then right.
-      execute(t->left);
-      return execute(t->right);
+      execute(t->left, 0);
+      _exit(execute(t->right, 0));
 
    } else if (t->conjunction == PIPE) {
       pid_t left_pid, right_pid;
@@ -166,67 +160,84 @@ int execute(struct tree *t) {
       }
 
       if (pipe(pipe_fd) < 0) {
-         err(EX_OSERR, "pipe error");
+         perror("pipe");
+         return 1;
       }
 
-      // Left Child
+      // left child
       if ((left_pid = fork()) < 0) {
-         err(EX_OSERR, "fork error.\n");
+         perror("fork");
+         return 1;
       }
+
       if (left_pid == 0) {
-         // Close read end.
          close(pipe_fd[0]);
 
-         // dup2 so output is in the pipe
-         dup2(pipe_fd[1], STDOUT_FILENO);
-
-         // Closing write end
+         if (dup2(pipe_fd[1], STDOUT_FILENO) < 0) {
+            perror("dup2");
+            _exit(1);
+         }
          close(pipe_fd[1]);
 
-         exit(execute(t->left));
+         /* NEW: apply redirection belonging to the left node */
+         if (apply_redirection(t->left) < 0) {
+            _exit(1);
+         }
+
+         _exit(execute(t->left, 0));
       }
 
-      // Right Child
+      // right child
       if ((right_pid = fork()) < 0) {
-         err(EX_OSERR, "fork error.\n");
+         perror("fork");
+            return 1;
       }
+
       if (right_pid == 0) {
-         // Close write end.
          close(pipe_fd[1]);
 
-         // dup2 so input comes from the pipe
-         dup2(pipe_fd[0], STDIN_FILENO);
-
-         // Closing read end
+         if (dup2(pipe_fd[0], STDOUT_FILENO) < 0) {
+            perror("dup2");
+            _exit(1);
+         }
          close(pipe_fd[0]);
 
-         exit(execute(t->right));
+         if (apply_redirection(t->right) < 0) {
+            _exit(1);
+         }
+
+         _exit(execute(t->right, 0));
       }
 
       // Parent code
       close(pipe_fd[0]);
       close(pipe_fd[1]);
 
-      waitpid(left_pid, &status, 0);
-      waitpid(right_pid, &status, 0);
-      return extract_status(status);
+      int left_status, right_status;
+
+      waitpid(left_pid, &left_status, 0);
+      waitpid(right_pid, &right_status, 0);
+
+      return extract_status(right_status);
       
    } else if (t->conjunction == SUBSHELL) {
-      pid_t n_pid;
-      if ((n_pid = fork()) < 0) {
-         err(EX_OSERR, "fork error.\n");
+      pid_t pid = fork();
+      if (pid < 0) {
+         perror("fork");
+         return 1;
       }
 
-      // Parent Code
-      if (n_pid != 0) {
-         waitpid(n_pid, &status, 0);
+      if (pid != 0) {
+         int status;
+         waitpid(pid, &status, 0);
          return extract_status(status);
-
-         // Child Code
-      } else {
-         // Executes the command (which is in the left tree) in a subshell.
-         exit(execute(t->left));
       }
+
+      if (apply_redirection(t) < 0) {
+         _exit(1);
+      }
+
+      _exit(execute(t->left, 0));
    }
 
    print_tree(t);

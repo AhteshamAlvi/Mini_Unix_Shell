@@ -37,7 +37,7 @@ int main(void) {
         }
 
         /* Execute */
-        execute(t);
+        execute(t, 1);
 
         /* Cleanup */
         free_tree(t);
