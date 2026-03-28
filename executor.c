@@ -6,6 +6,7 @@
 #include <sys/wait.h>
 #include <sysexits.h>
 #include <fcntl.h>
+#include <signal.h>
 #include "command.h"
 #include "executor.h"
 
@@ -88,9 +89,6 @@ static int handle_builtin(struct tree *t) {
 }
 
 int execute(struct tree *t, int allow_builtin) {
-   int status;
-   pid_t pid;
-
    if (t == NULL) {
       return -1;
    }
@@ -117,6 +115,8 @@ int execute(struct tree *t, int allow_builtin) {
          return extract_status(status);
       }
 
+      signal(SIGINT, SIG_DFL);
+
       if (apply_redirection(t) < 0) {
          _exit(1);
       }
@@ -133,7 +133,7 @@ int execute(struct tree *t, int allow_builtin) {
       return left;
 
    } else if (t->conjunction == OR) {
-      // Exevutes right if left is unsuccesseful.
+      // Executes right if left is unsuccessful.
       int left = execute(t->left, allow_builtin);
       if (left != 0)
          return execute(t->right, allow_builtin);
@@ -142,7 +142,7 @@ int execute(struct tree *t, int allow_builtin) {
    } else if (t->conjunction == SEMI) {
       // Executes left then right.
       execute(t->left, 0);
-      _exit(execute(t->right, 0));
+      return execute(t->right, 0);
 
    } else if (t->conjunction == PIPE) {
       pid_t left_pid, right_pid;
@@ -167,10 +167,13 @@ int execute(struct tree *t, int allow_builtin) {
       // left child
       if ((left_pid = fork()) < 0) {
          perror("fork");
+         close(pipe_fd[0]);
+         close(pipe_fd[1]);
          return 1;
       }
 
       if (left_pid == 0) {
+         signal(SIGINT, SIG_DFL);
          close(pipe_fd[0]);
 
          if (dup2(pipe_fd[1], STDOUT_FILENO) < 0) {
@@ -190,13 +193,17 @@ int execute(struct tree *t, int allow_builtin) {
       // right child
       if ((right_pid = fork()) < 0) {
          perror("fork");
-            return 1;
+         close(pipe_fd[0]);
+         close(pipe_fd[1]);
+         waitpid(left_pid, NULL, 0);
+         return 1;
       }
 
       if (right_pid == 0) {
+         signal(SIGINT, SIG_DFL);
          close(pipe_fd[1]);
 
-         if (dup2(pipe_fd[0], STDOUT_FILENO) < 0) {
+         if (dup2(pipe_fd[0], STDIN_FILENO) < 0) {
             perror("dup2");
             _exit(1);
          }
@@ -233,6 +240,8 @@ int execute(struct tree *t, int allow_builtin) {
          return extract_status(status);
       }
 
+      signal(SIGINT, SIG_DFL);
+
       if (apply_redirection(t) < 0) {
          _exit(1);
       }
@@ -252,7 +261,7 @@ print_tree(struct tree *t) {
       if (t->conjunction == NONE) {
          printf("NONE: %s, ", t->argv[0]);
       } else {
-         printf("%s, ", conj[t->conjunction]);
+         printf("%s, ", conj_names[t->conjunction]);
       }
       printf("IR: %s, ", t->input);
       printf("OR: %s\n", t->output);

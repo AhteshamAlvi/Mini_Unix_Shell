@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 
 #include "parser.h"
 #include "executor.h"
@@ -9,6 +10,9 @@
 
 int main(void) {
     char line[MAXLINE];
+
+    /* Shell ignores SIGINT — children restore default before exec */
+    signal(SIGINT, SIG_IGN);
 
     while (1) {
         /* Print prompt */

@@ -56,6 +56,10 @@ static struct tree *parse_command(parser_t *ps) {
         }
 
         struct tree *t = calloc(1, sizeof(*t));
+        if (!t) {
+            free_tree(inside);
+            return NULL;
+        }
         t->conjunction = SUBSHELL;
         t->left = inside;
         return t;
@@ -65,10 +69,15 @@ static struct tree *parse_command(parser_t *ps) {
         return NULL;
 
     struct tree *t = calloc(1, sizeof(*t));
+    if (!t) return NULL;
     t->conjunction = NONE;
 
     size_t argc = 0, cap = 4;
     t->argv = malloc(sizeof(char *) * cap);
+    if (!t->argv) {
+        free(t);
+        return NULL;
+    }
 
     while (ps->cur.type == TOK_WORD ||
            ps->cur.type == TOK_LT ||
@@ -77,25 +86,53 @@ static struct tree *parse_command(parser_t *ps) {
         if (ps->cur.type == TOK_WORD) {
             if (argc + 1 >= cap) {
                 cap *= 2;
-                t->argv = realloc(t->argv, sizeof(char *) * cap);
+                char **tmp = realloc(t->argv, sizeof(char *) * cap);
+                if (!tmp) {
+                    t->argv[argc] = NULL;
+                    free_tree(t);
+                    return NULL;
+                }
+                t->argv = tmp;
             }
-            t->argv[argc++] = strdup(ps->cur.text);
+            char *dup = strdup(ps->cur.text);
+            if (!dup) {
+                t->argv[argc] = NULL;
+                free_tree(t);
+                return NULL;
+            }
+            t->argv[argc++] = dup;
             advance(ps);
         } else if (ps->cur.type == TOK_LT) {
             advance(ps);
             if (ps->cur.type != TOK_WORD) {
+                t->argv[argc] = NULL;
                 free_tree(t);
                 return NULL;
             }
-            t->input = strdup(ps->cur.text);
+            char *dup = strdup(ps->cur.text);
+            if (!dup) {
+                t->argv[argc] = NULL;
+                free_tree(t);
+                return NULL;
+            }
+            free(t->input);
+            t->input = dup;
             advance(ps);
         } else if (ps->cur.type == TOK_GT) {
             advance(ps);
             if (ps->cur.type != TOK_WORD) {
+                t->argv[argc] = NULL;
                 free_tree(t);
                 return NULL;
             }
-            t->output = strdup(ps->cur.text);
+            char *dup = strdup(ps->cur.text);
+            if (!dup) {
+                t->argv[argc] = NULL;
+                free_tree(t);
+                return NULL;
+            }
+            free(t->output);
+            t->output = dup;
             advance(ps);
         }
     }
@@ -118,6 +155,11 @@ static struct tree *parse_pipe(parser_t *ps) {
         }
 
         struct tree *t = calloc(1, sizeof(*t));
+        if (!t) {
+            free_tree(left);
+            free_tree(right);
+            return NULL;
+        }
         t->conjunction = PIPE;
         t->left = left;
         t->right = right;
@@ -142,6 +184,11 @@ static struct tree *parse_and_or(parser_t *ps) {
         }
 
         struct tree *t = calloc(1, sizeof(*t));
+        if (!t) {
+            free_tree(left);
+            free_tree(right);
+            return NULL;
+        }
         t->conjunction = (op == TOK_AND) ? AND : OR;
         t->left = left;
         t->right = right;
@@ -165,6 +212,11 @@ static struct tree *parse_semi(parser_t *ps) {
         }
 
         struct tree *t = calloc(1, sizeof(*t));
+        if (!t) {
+            free_tree(left);
+            free_tree(right);
+            return NULL;
+        }
         t->conjunction = SEMI;
         t->left = left;
         t->right = right;
@@ -189,4 +241,3 @@ struct tree *parse_line(const char *line) {
     token_free(&ps.cur);
     return t;
 }
-

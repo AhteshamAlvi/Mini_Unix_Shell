@@ -5,7 +5,7 @@
 enum conjunction { NONE, AND, OR, SEMI, PIPE, SUBSHELL };
 
 /* Names for each conjunction (index with enum conjunction). */
-extern const char *conj[];
+extern const char *conj_names[];
 
 /*
  * Abstract syntax tree node for a command line.
